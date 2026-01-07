@@ -1,15 +1,20 @@
 'use client';
 
 import { useState } from 'react';
+import { db } from '@/lib/firebase'; // Import config
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore'; // Firestore functions
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // Storage functions
 
 export default function UserDashboard() {
+  const [isSubmitting, setIsSubmitting] = useState(false); // Add loading state
   const [showReportModal, setShowReportModal] = useState(false);
   const [formData, setFormData] = useState({
     category: '',
     location: '',
     description: '',
-    photo: null,
   });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoName, setPhotoName] = useState('');
 
   const recentReports = [
     {
@@ -56,15 +61,51 @@ export default function UserDashboard() {
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      setFormData({ ...formData, photo: file.name });
+      setPhotoFile(file);
+      setPhotoName(file.name);
     }
   };
 
-  const handleSubmitReport = (e) => {
+  const handleSubmitReport = async (e) => {
     e.preventDefault();
-    console.log('Report submitted:', formData);
-    setShowReportModal(false);
-    setFormData({ category: '', location: '', description: '', photo: null });
+    setIsSubmitting(true);
+
+    try {
+      let imageUrl = "";
+
+      // 1. Upload Image to Firebase Storage (if photo exists)
+      if (photoFile) {
+        const storage = getStorage();
+        const imageRef = ref(storage, `reports/${Date.now()}_${photoFile.name}`);
+        const uploadResult = await uploadBytes(imageRef, photoFile);
+        imageUrl = await getDownloadURL(uploadResult.ref);
+      }
+
+      // 2. Save Report Data to Firestore
+      await addDoc(collection(db, "reports"), {
+        category: formData.category,
+        location: formData.location,
+        description: formData.description,
+        imageUrl: imageUrl, // Save the download link
+        status: "pending",
+        ward: "Ward 42", // You can make this dynamic if needed
+        userName: "Guest User", // Replace with real user info if you have auth
+        createdAt: serverTimestamp(),
+      });
+
+      console.log('Report submitted successfully');
+      setShowReportModal(false);
+      setFormData({ category: '', location: '', description: '' });
+      setPhotoFile(null);
+      setPhotoName('');
+      alert("Report Submitted!");
+
+    } catch (error) {
+      console.error("Error submitting report:", error);
+      alert("Error submitting report");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -230,7 +271,7 @@ export default function UserDashboard() {
                 <label className="border-2 border-dashed border-neutral-300 hover:border-primary-500 transition-colors rounded-lg p-lg flex flex-col items-center justify-center cursor-pointer bg-neutral-50 hover:bg-primary-50">
                   <span className="material-icons text-4xl text-neutral-400 mb-sm">camera_alt</span>
                   <p className="text-sm font-semibold text-neutral-700 text-center">
-                    {formData.photo ? formData.photo : 'Take or upload a photo'}
+                    {photoName ? photoName : 'Take or upload a photo'}
                   </p>
                   <p className="text-xs text-neutral-500 mt-sm">Click to select or drag & drop</p>
                   <input
