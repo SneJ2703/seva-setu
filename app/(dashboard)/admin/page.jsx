@@ -1,155 +1,70 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import IssueCard from '@/components/IssueCard';
 import IssueStatsPanel from '@/components/IssueStatsPanel';
+import { firestore } from '@/lib/firebase';
+import SeedButton from '@/components/SeedButton'; // Ensure this path is correct
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import WorkerStatusPanel from '@/components/WorkerStatusPanel';
 
-// Dummy Issues Data
-const dummyIssues = [
-  {
-    id: 'ISS-001',
-    title: 'Water Pipe Leaking',
-    category: 'water',
-    priority: 'urgent',
-    ward: 'Ward 12',
-    location: 'Sector 5-A',
-    address: 'Main Street near Post Office',
-    description:
-      'Water is leaking from the main supply pipe. Children are drinking contaminated water. Needs urgent repair and water quality testing.',
-    reportedBy: 'Rajesh Kumar',
-    timeAgo: '2 hours ago',
-    images: ['/img1.jpg'],
-  },
-  {
-    id: 'ISS-002',
-    title: 'Damaged Road Surface',
-    category: 'road',
-    priority: 'medium',
-    ward: 'Ward 8',
-    location: 'Sector 3-B',
-    address: 'Highway near traffic light',
-    description:
-      'Large pothole on main road causing traffic congestion and accidents. Multiple complaints from commuters.',
-    reportedBy: 'Priya Sharma',
-    timeAgo: '5 hours ago',
-    images: ['/img2.jpg'],
-  },
-  {
-    id: 'ISS-003',
-    title: 'Streetlight Not Working',
-    category: 'electricity',
-    priority: 'medium',
-    ward: 'Ward 15',
-    location: 'Sector 7-C',
-    address: 'Near park entrance',
-    description:
-      'Street light is not functioning. This causes safety issues at night. Residents report security concerns.',
-    reportedBy: 'Amit Patel',
-    timeAgo: '8 hours ago',
-    images: ['/img3.jpg'],
-  },
-  {
-    id: 'ISS-004',
-    title: 'Garbage Pile-up',
-    category: 'sanitation',
-    priority: 'low',
-    ward: 'Ward 5',
-    location: 'Sector 2-A',
-    address: 'Market area',
-    description: 'Garbage not collected for 3 days. Creating odor and attracting rodents.',
-    reportedBy: 'Deepak Singh',
-    timeAgo: '1 day ago',
-    images: ['/img4.jpg'],
-  },
-  {
-    id: 'ISS-005',
-    title: 'Fire Safety Equipment Missing',
-    category: 'fire',
-    priority: 'urgent',
-    ward: 'Ward 3',
-    location: 'Sector 4-D',
-    address: 'Shopping mall area',
-    description:
-      'Fire extinguishers missing from emergency exit. High occupancy area. Immediate inspection needed.',
-    reportedBy: 'Neha Gupta',
-    timeAgo: '3 hours ago',
-    images: ['/img5.jpg'],
-  },
-  {
-    id: 'ISS-006',
-    title: 'Water Quality Issue',
-    category: 'water',
-    priority: 'low',
-    ward: 'Ward 10',
-    location: 'Sector 6-B',
-    address: 'Residential area',
-    description: 'Tap water has yellowish tint and unusual smell. Testing recommended.',
-    reportedBy: 'Vikram Desai',
-    timeAgo: '2 days ago',
-    images: ['/img6.jpg'],
-  },
-];
-
-// Ongoing Issues Data
-const ongoingIssues = [
-  {
-    id: 'ONG-001',
-    title: 'Sewer Line Blockage',
-    category: 'sanitation',
-    priority: 'medium',
-    ward: 'Ward 7',
-    location: 'Sector 4-A',
-    address: 'Near colony gate',
-    description:
-      'Main sewer line blocked causing water backflow. Repair work in progress for 5 days.',
-    reportedBy: 'Suresh Kumar',
-    timeAgo: '5 days ago',
-    images: ['/img7.jpg'],
-  },
-  {
-    id: 'ONG-002',
-    title: 'Street Repair Work',
-    category: 'road',
-    priority: 'medium',
-    ward: 'Ward 6',
-    location: 'Sector 2-C',
-    address: 'Main commercial road',
-    description:
-      'Pothole repair work started. Expected completion in 3 days. Traffic diversion in place.',
-    reportedBy: 'Patel Construction',
-    timeAgo: '3 days ago',
-    images: ['/img8.jpg'],
-  },
-  {
-    id: 'ONG-003',
-    title: 'Electricity Network Upgrade',
-    category: 'electricity',
-    priority: 'low',
-    ward: 'Ward 11',
-    location: 'Sector 8-A',
-    address: 'Central transformer station',
-    description:
-      'Scheduled maintenance of electrical grid. Work in progress for power stabilization.',
-    reportedBy: 'Electricity Board',
-    timeAgo: '4 days ago',
-    images: ['/img9.jpg'],
-  },
-];
-
 export default function AdminDashboard() {
-  const [issues] = useState(dummyIssues);
-  const [ongoingIssuesData] = useState(ongoingIssues);
-  const [, setSelectedIssue] = useState(null);
+  // State for data
+  const [issues, setIssues] = useState([]);
+  const [workers, setWorkers] = useState([]);
+
+  // State for UI
+  const [selectedIssue, setSelectedIssue] = useState(null);
   const [assignedIssues, setAssignedIssues] = useState({});
   const [assignedWorkers, setAssignedWorkers] = useState({});
-  const [mobileTab, setMobileTab] = useState('issues'); // 'issues' or 'status'
-  const [workersOpen, setWorkersOpen] = useState(false); // Mobile workers side panel
+  const [mobileTab, setMobileTab] = useState('issues');
+  const [workersOpen, setWorkersOpen] = useState(false);
+
+  // Derived State: Filter issues based on status
+  // 'newIssues' are those with status 'open'
+  const newIssues = issues.filter(issue => issue.status === 'open');
+  // 'ongoingIssuesList' are those assigned or in progress
+  const ongoingIssuesList = issues.filter(issue => issue.status === 'assigned' || issue.status === 'in_progress');
 
   const handleViewDetails = (issue) => {
     setSelectedIssue(issue);
-    // In production, this would open a modal
   };
+
+  // Fetch Data on Component Load
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // 1. Fetch Issues
+        const issuesQuery = query(collection(firestore, "issues"), orderBy("createdAt", "desc"));
+        const issuesSnapshot = await getDocs(issuesQuery);
+        const fetchedIssues = issuesSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            // Transform Firebase timestamp to readable string safely
+            timeAgo: data.createdAt?.toDate ? data.createdAt.toDate().toLocaleString() : 'Just now',
+            // Ensure images is an array
+            images: data.images || []
+          };
+        });
+        setIssues(fetchedIssues);
+
+        // 2. Fetch Workers
+        const workersSnapshot = await getDocs(collection(firestore, "workers"));
+        const fetchedWorkers = workersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setWorkers(fetchedWorkers);
+
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const handleAssignWorker = (issueId, worker) => {
     setAssignedIssues((prev) => ({
@@ -164,15 +79,20 @@ export default function AdminDashboard() {
 
   const handleFilterChange = (status) => {
     console.log('Filter by status:', status);
-    // In production, this would filter the issues
   };
 
   return (
     <div className="pt-md pb-md md:pb-md px-md md:px-lg max-w-7xl mx-auto">
+
+      {/* ------------------------------------------------------- */}
+      {/* FIX: Button must be INSIDE this div */}
+      <SeedButton />
+      {/* ------------------------------------------------------- */}
+
       {/* Mobile Header */}
       <div className="md:hidden mb-lg">
         <div className="flex items-center gap-sm">
-          <button 
+          <button
             onClick={() => setWorkersOpen(!workersOpen)}
             className="p-sm hover:bg-neutral-100 rounded-md transition-colors"
           >
@@ -193,7 +113,7 @@ export default function AdminDashboard() {
 
       {/* Mobile Side Panel for Workers */}
       {workersOpen && (
-        <div 
+        <div
           className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-50 top-[60px]"
           onClick={() => setWorkersOpen(false)}
         />
@@ -206,7 +126,7 @@ export default function AdminDashboard() {
         <div className="p-lg">
           <div className="flex items-center justify-between mb-lg">
             <h3 className="text-lg font-bold text-neutral-800">Available Workers</h3>
-            <button 
+            <button
               onClick={() => setWorkersOpen(false)}
               className="p-sm hover:bg-neutral-100 rounded-md"
             >
@@ -217,7 +137,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Desktop Grid Layout - Same as before */}
+      {/* Desktop Grid Layout */}
       <div className="hidden md:grid grid-cols-3 gap-lg">
         {/* LEFT COLUMN - Worker Status */}
         <div className="col-span-1">
@@ -230,7 +150,7 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between mb-md">
               <h2 className="text-2xl font-bold text-neutral-800">
                 <span className="material-icons inline-block mr-md text-danger">priority_high</span>
-                New Issues <span className="text-warning text-lg ml-sm">(23 Pending)</span>
+                New Issues <span className="text-warning text-lg ml-sm">({newIssues.length} Pending)</span>
               </h2>
             </div>
 
@@ -250,9 +170,10 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Issue Cards Feed */}
+          {/* Issue Cards Feed - FIX: Use newIssues variable here */}
           <div className="space-y-md">
-            {issues.map((issue) => (
+            {newIssues.length === 0 && <p className="text-neutral-500 text-center">No new issues.</p>}
+            {newIssues.map((issue) => (
               <IssueCard
                 key={issue.id}
                 issue={issue}
@@ -270,29 +191,14 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-between mb-md">
                 <h2 className="text-2xl font-bold text-neutral-800">
                   <span className="material-icons inline-block mr-md text-neutral-700">schedule</span>
-                  Ongoing Issues <span className="text-warning text-lg ml-sm">(3 In Progress)</span>
+                  Ongoing Issues <span className="text-warning text-lg ml-sm">({ongoingIssuesList.length} In Progress)</span>
                 </h2>
-              </div>
-
-              <div className="flex flex-wrap gap-sm mb-md">
-                <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                  <span className="material-icons text-sm">tune</span>
-                  Filter
-                </button>
-                <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                  <span className="material-icons text-sm">sort</span>
-                  Sort
-                </button>
-                <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                  <span className="material-icons text-sm">refresh</span>
-                  Refresh
-                </button>
               </div>
             </div>
 
-            {/* Ongoing Issue Cards Feed */}
+            {/* Ongoing Issue Cards Feed - FIX: Use ongoingIssuesList variable here */}
             <div className="space-y-md">
-              {ongoingIssuesData.map((issue) => (
+              {ongoingIssuesList.map((issue) => (
                 <IssueCard
                   key={issue.id}
                   issue={issue}
@@ -319,21 +225,19 @@ export default function AdminDashboard() {
         <div className="flex border-b border-neutral-200 sticky top-[60px] bg-white z-30 -mx-md px-md">
           <button
             onClick={() => setMobileTab('issues')}
-            className={`flex-1 py-md px-md border-b-2 transition-colors font-semibold text-sm ${
-              mobileTab === 'issues' 
-                ? 'border-primary-700 text-primary-700' 
-                : 'border-transparent text-neutral-600'
-            }`}
+            className={`flex-1 py-md px-md border-b-2 transition-colors font-semibold text-sm ${mobileTab === 'issues'
+              ? 'border-primary-700 text-primary-700'
+              : 'border-transparent text-neutral-600'
+              }`}
           >
             Issues
           </button>
           <button
             onClick={() => setMobileTab('status')}
-            className={`flex-1 py-md px-md border-b-2 transition-colors font-semibold text-sm ${
-              mobileTab === 'status' 
-                ? 'border-primary-700 text-primary-700' 
-                : 'border-transparent text-neutral-600'
-            }`}
+            className={`flex-1 py-md px-md border-b-2 transition-colors font-semibold text-sm ${mobileTab === 'status'
+              ? 'border-primary-700 text-primary-700'
+              : 'border-transparent text-neutral-600'
+              }`}
           >
             Status
           </button>
@@ -347,29 +251,15 @@ export default function AdminDashboard() {
                 <div className="flex items-center justify-between mb-md">
                   <h2 className="text-2xl font-bold text-neutral-800">
                     <span className="material-icons inline-block mr-md text-danger">priority_high</span>
-                    New Issues <span className="text-warning text-lg ml-sm">(23 Pending)</span>
+                    New Issues <span className="text-warning text-lg ml-sm">({newIssues.length} Pending)</span>
                   </h2>
                 </div>
-
-                <div className="flex flex-wrap gap-sm mb-md">
-                  <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                    <span className="material-icons text-sm">tune</span>
-                    Filter
-                  </button>
-                  <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                    <span className="material-icons text-sm">sort</span>
-                    Sort
-                  </button>
-                  <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                    <span className="material-icons text-sm">refresh</span>
-                    Refresh
-                  </button>
-                </div>
+                {/* ... filters ... */}
               </div>
 
-              {/* Issue Cards Feed */}
+              {/* Issue Cards Feed - FIX: Use newIssues */}
               <div className="space-y-md mb-2xl">
-                {issues.map((issue) => (
+                {newIssues.map((issue) => (
                   <IssueCard
                     key={issue.id}
                     issue={issue}
@@ -387,29 +277,14 @@ export default function AdminDashboard() {
                   <div className="flex items-center justify-between mb-md">
                     <h2 className="text-2xl font-bold text-neutral-800">
                       <span className="material-icons inline-block mr-md text-neutral-700">schedule</span>
-                      Ongoing Issues <span className="text-warning text-lg ml-sm">(3 In Progress)</span>
+                      Ongoing Issues <span className="text-warning text-lg ml-sm">({ongoingIssuesList.length} In Progress)</span>
                     </h2>
-                  </div>
-
-                  <div className="flex flex-wrap gap-sm mb-md">
-                    <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                      <span className="material-icons text-sm">tune</span>
-                      Filter
-                    </button>
-                    <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                      <span className="material-icons text-sm">sort</span>
-                      Sort
-                    </button>
-                    <button className="px-md py-sm border border-neutral-300 rounded-md text-sm hover:border-primary-700 transition-colors flex items-center gap-sm">
-                      <span className="material-icons text-sm">refresh</span>
-                      Refresh
-                    </button>
                   </div>
                 </div>
 
-                {/* Ongoing Issue Cards Feed */}
+                {/* Ongoing Issue Cards Feed - FIX: Use ongoingIssuesList */}
                 <div className="space-y-md">
-                  {ongoingIssuesData.map((issue) => (
+                  {ongoingIssuesList.map((issue) => (
                     <IssueCard
                       key={issue.id}
                       issue={issue}
