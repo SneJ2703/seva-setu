@@ -18,6 +18,13 @@ const categoryIcons = {
   health: 'local_hospital',
 };
 
+// Helper function to safely render values that might be objects
+const safeString = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return value.name || value.title || JSON.stringify(value);
+  return String(value);
+};
+
 export default function IssueCard({
   issue,
   onViewDetails,
@@ -25,16 +32,11 @@ export default function IssueCard({
   isAssigned = false,
   assignedWorker = null,
   hideAssign = false,
+  workers = [], // Add workers prop with default empty array
 }) {
   const [showAssignDropdown, setShowAssignDropdown] = useState(false);
   const priorityData = priorityConfig[issue.priority] || priorityConfig.low;
   const categoryIcon = categoryIcons[issue.category] || '📍';
-
-  const workers = [
-    { id: 1, name: 'Ravi', dept: 'Water', distance: '2.5 km', status: 'free' },
-    { id: 2, name: 'Priya', dept: 'Water', distance: '1.8 km', status: 'free' },
-    { id: 3, name: 'Arjun', dept: 'Water', distance: '4.2 km', status: 'busy' },
-  ];
 
   const handleAssignWorker = (worker) => {
     setShowAssignDropdown(false);
@@ -42,7 +44,7 @@ export default function IssueCard({
   };
 
   return (
-    <div className="bg-white border border-neutral-200 rounded-lg overflow-hidden shadow-elevated hover:shadow-floating transition-all duration-200 mb-md">
+    <div className="bg-white border border-neutral-200 rounded-lg shadow-elevated hover:shadow-floating transition-all duration-200 mb-md relative">
       {/* Image Section */}
       <div className="relative h-[180px] md:h-[200px] bg-gradient-to-br from-neutral-200 to-neutral-300 overflow-hidden flex items-center justify-center">
         {issue.imageUrl ? (
@@ -74,7 +76,7 @@ export default function IssueCard({
             <div className="flex items-center gap-sm mb-sm">
               <span className="material-icons text-2xl">{categoryIcon}</span>
               <h3 className="text-lg font-bold text-neutral-800 flex-1">
-                {issue.title}
+                {safeString(issue.title)}
               </h3>
             </div>
             <span className={`inline-flex items-center gap-sm px-2 py-1 rounded text-xs font-bold text-white ${priorityData.color}`}>
@@ -88,25 +90,25 @@ export default function IssueCard({
         <div className="mb-md">
           <p className="text-sm text-neutral-600 font-semibold flex items-center gap-sm">
             <span className="material-icons text-lg">location_on</span>
-            {issue.ward}, {issue.location}
+            {safeString(issue.ward)}, {safeString(issue.location)}
           </p>
-          <p className="text-sm text-neutral-500 ml-md">{issue.address}</p>
+          <p className="text-sm text-neutral-500 ml-md">{safeString(issue.address)}</p>
         </div>
 
         {/* Description */}
         <p className="text-base text-neutral-700 mb-md line-clamp-3">
-          {issue.description}
+          {safeString(issue.description)}
         </p>
 
         {/* Meta Info */}
         <div className="flex items-center justify-between text-sm text-neutral-500 mb-md pb-md border-b border-neutral-200">
           <span className="flex items-center gap-sm">
             <span className="material-icons text-lg">person</span>
-            {issue.reportedBy}
+            {safeString(issue.reportedBy)}
           </span>
           <span className="flex items-center gap-sm">
             <span className="material-icons text-lg">access_time</span>
-            {issue.timeAgo}
+            {safeString(issue.timeAgo)}
           </span>
         </div>
 
@@ -145,28 +147,32 @@ export default function IssueCard({
 
               {/* Dropdown Menu */}
               {showAssignDropdown && (
-                <div className="absolute top-full mt-2 right-0 left-0 bg-white border border-neutral-200 rounded-md shadow-floating z-10 min-w-[280px] md:min-w-[300px]">
+                <div className="absolute top-full mt-2 right-0 left-0 bg-white border border-neutral-200 rounded-md shadow-floating z-50 min-w-[280px] md:min-w-[300px]">
                   <div className="p-md max-h-[300px] overflow-y-auto">
                     <p className="text-xs font-bold text-neutral-500 mb-sm">SELECT A WORKER</p>
-                    {workers.map((worker) => (
-                      <button
-                        key={worker.id}
-                        onClick={() => handleAssignWorker(worker)}
-                        className="w-full text-left px-md py-sm hover:bg-neutral-100 rounded mb-sm transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`material-icons ${worker.status === 'free' ? 'text-success' : 'text-warning'}`}>
-                            {worker.status === 'free' ? 'radio_button_checked' : 'schedule'}
-                          </span>
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-neutral-800">{worker.name}</p>
-                            <p className="text-xs text-neutral-500">
-                              {worker.dept} • {worker.distance}
-                            </p>
+                    {workers.length === 0 ? (
+                      <p className="text-sm text-neutral-500 text-center py-md">No workers available</p>
+                    ) : (
+                      workers.map((worker) => (
+                        <button
+                          key={worker.id}
+                          onClick={() => handleAssignWorker(worker)}
+                          className="w-full text-left px-md py-sm hover:bg-neutral-100 rounded mb-sm transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`material-icons ${worker.status === 'free' ? 'text-success' : 'text-warning'}`}>
+                              {worker.status === 'free' ? 'radio_button_checked' : 'schedule'}
+                            </span>
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-neutral-800">{safeString(worker.name)}</p>
+                              <p className="text-xs text-neutral-500">
+                                {safeString(worker.department || worker.dept) || 'Unassigned'}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </button>
-                    ))}
+                        </button>
+                      ))
+                    )}
                   </div>
                 </div>
               )}

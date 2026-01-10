@@ -90,6 +90,26 @@ export default function WorkerDashboard() {
     setCompletionPhoto(null);
   };
 
+  // Open Google Maps to view location
+  const openInGoogleMaps = () => {
+    const { latitude, longitude, address } = currentAssignment;
+    const query = encodeURIComponent(address);
+    const url = latitude && longitude
+      ? `https://www.google.com/maps?q=${latitude},${longitude}`
+      : `https://www.google.com/maps/search/?api=1&query=${query}`;
+    window.open(url, '_blank');
+  };
+
+  // Open Google Maps with navigation/directions
+  const navigateToLocation = () => {
+    const { latitude, longitude, address } = currentAssignment;
+    const destination = latitude && longitude
+      ? `${latitude},${longitude}`
+      : encodeURIComponent(address);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="pt-lg pb-24 md:pb-lg px-md md:px-lg bg-neutral-50 min-h-screen">
       <div className="max-w-4xl mx-auto">
@@ -210,7 +230,10 @@ export default function WorkerDashboard() {
               </div>
 
               {/* Open Maps Button */}
-              <button className="w-full bg-primary-700 hover:bg-primary-800 text-white font-bold py-md rounded-lg transition-colors flex items-center justify-center gap-sm">
+              <button
+                onClick={openInGoogleMaps}
+                className="w-full bg-primary-700 hover:bg-primary-800 text-white font-bold py-md rounded-lg transition-colors flex items-center justify-center gap-sm"
+              >
                 <span className="material-icons">directions</span>
                 Open in Google Maps
               </button>
@@ -269,7 +292,10 @@ export default function WorkerDashboard() {
 
               {/* Navigate Button */}
               <div className="pt-md border-t border-neutral-300">
-                <button className="w-full bg-primary-700 hover:bg-primary-800 text-white font-bold py-md px-lg rounded-lg transition-colors flex items-center justify-center gap-sm">
+                <button
+                  onClick={navigateToLocation}
+                  className="w-full bg-primary-700 hover:bg-primary-800 text-white font-bold py-md px-lg rounded-lg transition-colors flex items-center justify-center gap-sm"
+                >
                   <span className="material-icons">directions</span>
                   Navigate to Location
                 </button>

@@ -1,13 +1,32 @@
 'use client';
 
-import { useState } from 'react';
-import { db } from '@/lib/firebase'; // Import config
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore'; // Firestore functions
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // Storage functions
+import { useState, useEffect } from 'react';
+import { database } from '@/lib/firebase';
+import { ref, push, set, onValue } from 'firebase/database';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+// Category mapping for display names
+const categoryLabels = {
+  pothole: 'Pothole on Road',
+  garbage: 'Garbage Dump',
+  'street-light': 'Street Light Issue',
+  water: 'Water Leakage',
+  other: 'Other Issue',
+};
+
+// Helper function to safely render values that might be objects
+const safeString = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return value.name || value.title || JSON.stringify(value);
+  return String(value);
+};
 
 export default function UserDashboard() {
-  const [isSubmitting, setIsSubmitting] = useState(false); // Add loading state
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [userReports, setUserReports] = useState([]);
   const [formData, setFormData] = useState({
     category: '',
     location: '',
@@ -16,36 +35,37 @@ export default function UserDashboard() {
   const [photoFile, setPhotoFile] = useState(null);
   const [photoName, setPhotoName] = useState('');
 
-  const recentReports = [
-    {
-      id: 'REP-001',
-      title: 'Pothole on Main Street',
-      location: '12th Main Rd, Ward 42',
-      status: 'pending',
-      createdAt: '2 hours ago',
-      description: 'Large pothole causing traffic congestion',
-    },
-    {
-      id: 'REP-002',
-      title: 'Garbage Accumulation',
-      location: 'CMH Road, Ward 42',
-      status: 'in-progress',
-      createdAt: '1 day ago',
-      description: 'Garbage pile near the community center',
-    },
-    {
-      id: 'REP-003',
-      title: 'Street Light Not Working',
-      location: 'Indiranagar Layout, Ward 42',
-      status: 'resolved',
-      createdAt: '3 days ago',
-      description: 'Street light repaired successfully',
-    },
-  ];
+  // Fetch user's reports from Realtime Database
+  useEffect(() => {
+    const issuesRef = ref(database, 'issues');
+
+    const unsubscribe = onValue(issuesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        const reports = Object.entries(data).map(([key, value]) => ({
+          id: key,
+          ...value,
+          createdAt: value.createdAt
+            ? new Date(value.createdAt).toLocaleString()
+            : 'Just now',
+        }));
+        // Sort by createdAt descending and take first 10
+        reports.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setUserReports(reports.slice(0, 10));
+      } else {
+        setUserReports([]);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const statusConfig = {
     pending: { label: 'Pending', color: 'bg-neutral-100 text-neutral-700', icon: 'schedule' },
+    open: { label: 'Open', color: 'bg-neutral-100 text-neutral-700', icon: 'schedule' },
+    assigned: { label: 'Assigned', color: 'bg-primary-100 text-primary-700', icon: 'person' },
     'in-progress': { label: 'In Progress', color: 'bg-warning-100 text-warning-700', icon: 'build' },
+    in_progress: { label: 'In Progress', color: 'bg-warning-100 text-warning-700', icon: 'build' },
     resolved: { label: 'Resolved', color: 'bg-success-100 text-success-700', icon: 'check_circle' },
   };
 
@@ -66,43 +86,67 @@ export default function UserDashboard() {
     }
   };
 
+  const handleViewDetails = (report) => {
+    setSelectedReport(report);
+    setShowDetailModal(true);
+  };
+
   const handleSubmitReport = async (e) => {
     e.preventDefault();
+
+    // Validation
+    if (!formData.category || !formData.location || !formData.description) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      let imageUrl = "";
+      let imageUrl = '';
 
       // 1. Upload Image to Firebase Storage (if photo exists)
       if (photoFile) {
-        const storage = getStorage();
-        const imageRef = ref(storage, `reports/${Date.now()}_${photoFile.name}`);
-        const uploadResult = await uploadBytes(imageRef, photoFile);
-        imageUrl = await getDownloadURL(uploadResult.ref);
+        try {
+          const storage = getStorage();
+          const imageRefPath = storageRef(storage, `issues/${Date.now()}_${photoFile.name}`);
+          const uploadResult = await uploadBytes(imageRefPath, photoFile);
+          imageUrl = await getDownloadURL(uploadResult.ref);
+        } catch (storageError) {
+          console.warn('Image upload failed, continuing without image:', storageError);
+        }
       }
 
-      // 2. Save Report Data to Firestore
-      await addDoc(collection(db, "reports"), {
+      // 2. Generate title from category
+      const title = categoryLabels[formData.category] || 'Issue Report';
+
+      // 3. Save Issue Data to Realtime Database
+      const issuesRef = ref(database, 'issues');
+      const newIssueRef = push(issuesRef);
+      await set(newIssueRef, {
+        title: title,
         category: formData.category,
         location: formData.location,
         description: formData.description,
-        imageUrl: imageUrl, // Save the download link
-        status: "pending",
-        ward: "Ward 42", // You can make this dynamic if needed
-        userName: "Guest User", // Replace with real user info if you have auth
-        createdAt: serverTimestamp(),
+        imageUrl: imageUrl,
+        status: 'open',
+        priority: 'medium',
+        ward: 'Ward 42',
+        address: formData.location,
+        reportedBy: 'Guest User',
+        createdAt: Date.now(),
       });
 
-      console.log('Report submitted successfully');
+      console.log('Issue submitted successfully');
       setShowReportModal(false);
       setFormData({ category: '', location: '', description: '' });
       setPhotoFile(null);
       setPhotoName('');
-      alert("Report Submitted!");
+      alert('Issue Submitted Successfully!');
 
     } catch (error) {
-      console.error("Error submitting report:", error);
-      alert("Error submitting report");
+      console.error('Error submitting issue:', error);
+      alert('Error submitting issue: ' + error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -122,7 +166,7 @@ export default function UserDashboard() {
           </p>
         </div>
 
-        {/* Report New Issue CTA - Widened */}
+        {/* Report New Issue CTA */}
         <div className="grid md:grid-cols-2 gap-lg mb-2xl">
           <button
             onClick={() => setShowReportModal(true)}
@@ -166,41 +210,48 @@ export default function UserDashboard() {
           </h2>
 
           <div className="space-y-md">
-            {recentReports.map((report) => {
-              const status = statusConfig[report.status];
-              return (
-                <div key={report.id} className="bg-white rounded-lg p-lg border border-neutral-200 shadow-sm hover:shadow-md transition-all">
-                  <div className="flex items-start justify-between gap-md mb-md">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-sm mb-sm">
-                        <h3 className="font-bold text-neutral-800">{report.title}</h3>
-                        <span className={`inline-flex items-center gap-xs px-2 py-1 rounded text-xs font-semibold ${status.color}`}>
-                          <span className="material-icons text-sm">{status.icon}</span>
-                          {status.label}
-                        </span>
+            {userReports.length === 0 ? (
+              <p className="text-neutral-500 text-center py-lg">No reports yet. Submit your first issue!</p>
+            ) : (
+              userReports.map((report) => {
+                const status = statusConfig[report.status] || statusConfig.pending;
+                return (
+                  <div key={report.id} className="bg-white rounded-lg p-lg border border-neutral-200 shadow-sm hover:shadow-md transition-all">
+                    <div className="flex items-start justify-between gap-md mb-md">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-sm mb-sm">
+                          <h3 className="font-bold text-neutral-800">{report.title}</h3>
+                          <span className={`inline-flex items-center gap-xs px-2 py-1 rounded text-xs font-semibold ${status.color}`}>
+                            <span className="material-icons text-sm">{status.icon}</span>
+                            {status.label}
+                          </span>
+                        </div>
+                        <p className="text-sm text-neutral-600 mb-sm line-clamp-2">{report.description}</p>
+                        <p className="text-xs text-neutral-500 flex items-center gap-sm">
+                          <span className="material-icons text-sm">location_on</span>
+                          {report.location || report.address}
+                        </p>
                       </div>
-                      <p className="text-sm text-neutral-600 mb-sm">{report.description}</p>
-                      <p className="text-xs text-neutral-500 flex items-center gap-sm">
-                        <span className="material-icons text-sm">location_on</span>
-                        {report.location}
-                      </p>
+                    </div>
+                    <div className="pt-md border-t border-neutral-200">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-neutral-500 flex items-center gap-sm">
+                          <span className="material-icons text-sm">access_time</span>
+                          {report.createdAt}
+                        </p>
+                        <button
+                          onClick={() => handleViewDetails(report)}
+                          className="text-sm font-semibold text-primary-700 hover:text-primary-800 flex items-center gap-sm"
+                        >
+                          View Details
+                          <span className="material-icons text-sm">arrow_forward</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="pt-md border-t border-neutral-200">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-neutral-500 flex items-center gap-sm">
-                        <span className="material-icons text-sm">access_time</span>
-                        {report.createdAt}
-                      </p>
-                      <button className="text-sm font-semibold text-primary-700 hover:text-primary-800 flex items-center gap-sm">
-                        View Details
-                        <span className="material-icons text-sm">arrow_forward</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -224,10 +275,11 @@ export default function UserDashboard() {
             <form onSubmit={handleSubmitReport} className="p-lg space-y-lg">
               {/* Category */}
               <div>
-                <label className="block text-sm font-bold text-neutral-800 mb-sm">Category</label>
+                <label className="block text-sm font-bold text-neutral-800 mb-sm">Category *</label>
                 <select
                   value={formData.category}
                   onChange={handleCategoryChange}
+                  required
                   className="w-full px-md py-md border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-700 focus:ring-2 focus:ring-primary-200 transition-all bg-white"
                 >
                   <option value="">Select a category...</option>
@@ -241,12 +293,13 @@ export default function UserDashboard() {
 
               {/* Location */}
               <div>
-                <label className="block text-sm font-bold text-neutral-800 mb-sm">Location</label>
+                <label className="block text-sm font-bold text-neutral-800 mb-sm">Location *</label>
                 <input
                   type="text"
                   name="location"
                   value={formData.location}
                   onChange={handleInputChange}
+                  required
                   placeholder="e.g., CMH Road, Ward 42"
                   className="w-full px-md py-md border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-700 focus:ring-2 focus:ring-primary-200 transition-all"
                 />
@@ -254,11 +307,12 @@ export default function UserDashboard() {
 
               {/* Description */}
               <div>
-                <label className="block text-sm font-bold text-neutral-800 mb-sm">Description</label>
+                <label className="block text-sm font-bold text-neutral-800 mb-sm">Description *</label>
                 <textarea
                   name="description"
                   value={formData.description}
                   onChange={handleInputChange}
+                  required
                   placeholder="Describe the issue in detail..."
                   rows={5}
                   className="w-full px-md py-md border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-700 focus:ring-2 focus:ring-primary-200 transition-all resize-none"
@@ -267,7 +321,7 @@ export default function UserDashboard() {
 
               {/* Photo Upload */}
               <div>
-                <label className="block text-sm font-bold text-neutral-800 mb-sm">Photo</label>
+                <label className="block text-sm font-bold text-neutral-800 mb-sm">Photo (Optional)</label>
                 <label className="border-2 border-dashed border-neutral-300 hover:border-primary-500 transition-colors rounded-lg p-lg flex flex-col items-center justify-center cursor-pointer bg-neutral-50 hover:bg-primary-50">
                   <span className="material-icons text-4xl text-neutral-400 mb-sm">camera_alt</span>
                   <p className="text-sm font-semibold text-neutral-700 text-center">
@@ -286,11 +340,97 @@ export default function UserDashboard() {
               {/* Submit Button */}
               <button
                 type="submit"
-                className="w-full bg-primary-700 hover:bg-primary-800 text-white font-bold py-md rounded-lg transition-colors mt-lg"
+                disabled={isSubmitting}
+                className="w-full bg-primary-700 hover:bg-primary-800 disabled:bg-neutral-400 text-white font-bold py-md rounded-lg transition-colors mt-lg flex items-center justify-center gap-sm"
               >
-                Submit Issue
+                {isSubmitting ? (
+                  <>
+                    <span className="material-icons animate-spin">refresh</span>
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit Issue'
+                )}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* View Details Modal */}
+      {showDetailModal && selectedReport && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-md z-50">
+          <div className="bg-white rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b border-neutral-200 px-lg py-md flex items-center justify-between">
+              <h3 className="text-xl font-bold text-neutral-800">Issue Details</h3>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="text-neutral-500 hover:text-neutral-700 transition-colors"
+              >
+                <span className="material-icons">close</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-lg space-y-lg">
+              {/* Image */}
+              {selectedReport.imageUrl && (
+                <div className="rounded-lg overflow-hidden">
+                  <img
+                    src={selectedReport.imageUrl}
+                    alt={selectedReport.title}
+                    className="w-full h-48 object-cover"
+                  />
+                </div>
+              )}
+
+              {/* Title & Status */}
+              <div>
+                <div className="flex items-center gap-sm mb-sm">
+                  <h4 className="text-lg font-bold text-neutral-800">{safeString(selectedReport.title)}</h4>
+                  <span className={`inline-flex items-center gap-xs px-2 py-1 rounded text-xs font-semibold ${(statusConfig[selectedReport.status] || statusConfig.pending).color}`}>
+                    {(statusConfig[selectedReport.status] || statusConfig.pending).label}
+                  </span>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <p className="text-xs font-bold text-neutral-500 mb-sm">DESCRIPTION</p>
+                <p className="text-neutral-700">{safeString(selectedReport.description)}</p>
+              </div>
+
+              {/* Location */}
+              <div>
+                <p className="text-xs font-bold text-neutral-500 mb-sm">LOCATION</p>
+                <p className="text-neutral-700 flex items-center gap-sm">
+                  <span className="material-icons text-lg">location_on</span>
+                  {safeString(selectedReport.location || selectedReport.address)}
+                </p>
+                <p className="text-sm text-neutral-500 ml-6">{safeString(selectedReport.ward)}</p>
+              </div>
+
+              {/* Reported Info */}
+              <div className="grid grid-cols-2 gap-md pt-md border-t border-neutral-200">
+                <div>
+                  <p className="text-xs font-bold text-neutral-500 mb-sm">REPORTED BY</p>
+                  <p className="text-neutral-700">{safeString(selectedReport.reportedBy) || 'Guest User'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-neutral-500 mb-sm">DATE</p>
+                  <p className="text-neutral-700">{safeString(selectedReport.createdAt)}</p>
+                </div>
+              </div>
+
+              {/* Assigned Worker (if any) */}
+              {selectedReport.assignedWorker && (
+                <div className="pt-md border-t border-neutral-200">
+                  <p className="text-xs font-bold text-neutral-500 mb-sm">ASSIGNED TO</p>
+                  <p className="text-neutral-700">Worker ID: {selectedReport.assignedWorker}</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
